@@ -33,6 +33,8 @@ interface FileEntry {
    * second `-` of `grep pat - -` reads EOF and contributes nothing.
    */
   stdinAtEof?: boolean;
+  /** Found by descending into a directory operand under -r. */
+  fromDirectory?: boolean;
 }
 
 interface GrepTraversalBudget {
@@ -192,8 +194,10 @@ export const grepCommand: RuntimeCommand = {
     let noFilename = false;
     let quietMode = false;
     let maxCount = 0; // 0 means unlimited
-    let beforeContext = 0;
-    let afterContext = 0;
+    // -1 until -A/-B/-C is given: any explicit context, even 0, makes GNU
+    // grep separate non-adjacent groups with --.
+    let beforeContext = -1;
+    let afterContext = -1;
     const includePatterns: string[] = [];
     const excludePatterns: string[] = [];
     const excludeDirPatterns: string[] = [];
@@ -426,6 +430,9 @@ export const grepCommand: RuntimeCommand = {
     if (patterns.length === 0 && !invertMatch && !filesWithoutMatch) {
       return { stdout: "", stderr: "", exitCode: 1 };
     }
+    const contextGiven = beforeContext >= 0 || afterContext >= 0;
+    beforeContext = Math.max(beforeContext, 0);
+    afterContext = Math.max(afterContext, 0);
     const files = operands;
 
     // Build regex using shared search-engine
@@ -505,6 +512,8 @@ export const grepCommand: RuntimeCommand = {
         onlyMatching,
         beforeContext,
         afterContext,
+        contextGroups: contextGiven,
+        omitContextLines: true,
         maxCount,
         matchBeyondMaxCount: false,
         kResetGroup,
@@ -536,6 +545,8 @@ export const grepCommand: RuntimeCommand = {
     let stderr = "";
     let anyMatch = false;
     let anyError = false;
+    /** A context group was printed, so the next file's group is separated. */
+    let printedGroup = false;
 
     // Collect all files to search (expand globs first)
     // FileEntry includes type info when available to skip stat calls
@@ -560,12 +571,8 @@ export const grepCommand: RuntimeCommand = {
      * first reader sees its contents.
      */
     let stdinConsumed = false;
-    /**
-     * True once a real path is queued. GNU only forces the file-name prefix
-     * under -r when recursion can actually descend into a directory, and `-` is
-     * never a directory: `grep -r pat -` prints bare lines.
-     */
-    let hasFileTarget = false;
+    /** Operands after glob expansion; more than one names every file. */
+    let operandEntries = 0;
     for (const file of files) {
       if (file === "-") {
         // GNU treats `-` as an operand naming standard input. It bypasses glob
@@ -584,9 +591,9 @@ export const grepCommand: RuntimeCommand = {
           stdinAtEof: stdinConsumed,
         });
         stdinConsumed = true;
+        operandEntries++;
         continue;
       }
-      hasFileTarget = true;
       // Check if this is a glob pattern
       if (file.includes("*") || file.includes("?") || file.includes("[")) {
         const expanded = await expandGlobPatternWithTypes(
@@ -594,6 +601,7 @@ export const grepCommand: RuntimeCommand = {
           ctx,
           traversalBudget,
         );
+        operandEntries += expanded.length;
         if (recursive) {
           for (const f of expanded) {
             const recursiveExpanded = await expandRecursiveWithTypes(
@@ -611,6 +619,7 @@ export const grepCommand: RuntimeCommand = {
           appendFiles(expanded);
         }
       } else if (recursive) {
+        operandEntries++;
         const expanded = await expandRecursiveWithTypes(
           file,
           ctx,
@@ -628,13 +637,17 @@ export const grepCommand: RuntimeCommand = {
             "array_elements",
           );
         }
+        operandEntries++;
         filesToSearch.push({ path: file });
       }
     }
 
-    // Determine if we should show filename (after glob expansion)
-    const showFilename =
-      (filesToSearch.length > 1 || (recursive && hasFileTarget)) && !noFilename;
+    // GNU names the file when there is more than one operand (after glob
+    // expansion), or for files found inside a directory operand under -r;
+    // a lone file operand stays bare even with -r.
+    const multipleOperands = operandEntries > 1;
+    const showFilenameFor = (entry: FileEntry): boolean =>
+      !noFilename && (multipleOperands || entry.fromDirectory === true);
 
     // Process files in parallel batches for better performance
     const BATCH_SIZE = 50;
@@ -709,7 +722,9 @@ export const grepCommand: RuntimeCommand = {
                 : content;
               if (!preFilter.needles.some((n) => haystack.includes(n))) {
                 if (countOnly) {
-                  const countStr = showFilename ? `${file}:0` : "0";
+                  const countStr = showFilenameFor(fileEntry)
+                    ? `${file}:0`
+                    : "0";
                   return {
                     file,
                     result: {
@@ -730,10 +745,12 @@ export const grepCommand: RuntimeCommand = {
               invertMatch,
               showLineNumbers,
               countOnly,
-              filename: showFilename ? file : "",
+              filename: showFilenameFor(fileEntry) ? file : "",
               onlyMatching,
               beforeContext,
               afterContext,
+              contextGroups: contextGiven,
+              omitContextLines: true,
               maxCount,
               matchBeyondMaxCount: false,
               kResetGroup,
@@ -775,6 +792,11 @@ export const grepCommand: RuntimeCommand = {
           if (filesWithMatches) {
             stdout += `${file}\n`;
           } else if (!filesWithoutMatch) {
+            if (contextGiven && !countOnly && result.output !== "") {
+              // GNU grep separates the groups of different files with --
+              if (printedGroup) stdout += "--\n";
+              printedGroup = true;
+            }
             stdout += result.output;
           }
         } else {
@@ -1019,7 +1041,7 @@ async function expandRecursiveWithTypes(
         }
       }
       addTraversalResult(budget);
-      result.push({ path, isFile: true });
+      result.push({ path, isFile: true, fromDirectory: depth > 0 });
       return result;
     }
 

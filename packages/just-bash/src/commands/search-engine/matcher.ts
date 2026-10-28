@@ -70,6 +70,13 @@ export interface SearchOptions {
   matchBeyondMaxCount?: boolean;
   /** Separator between context groups (default: --) */
   contextSeparator?: string;
+  /**
+   * Context was requested explicitly, even as 0 (GNU grep -A0): separate
+   * non-adjacent groups although no context line is printed.
+   */
+  contextGroups?: boolean;
+  /** With onlyMatching, print no context lines, only separators (GNU grep -o) */
+  omitContextLines?: boolean;
   /** Show column number of first match */
   showColumn?: boolean;
   /** Output each match separately (vimgrep format) */
@@ -134,6 +141,8 @@ export function searchContent(
     maxCount = 0,
     matchBeyondMaxCount = true,
     contextSeparator = "--",
+    contextGroups = false,
+    omitContextLines = false,
     showColumn = false,
     vimgrep = false,
     showByteOffset = false,
@@ -258,7 +267,12 @@ export function searchContent(
   }
 
   // Fast path: no context needed (most common case)
-  if (beforeContext === 0 && afterContext === 0 && !passthru) {
+  if (
+    beforeContext === 0 &&
+    afterContext === 0 &&
+    !passthru &&
+    !contextGroups
+  ) {
     const outputLines: string[] = [];
     let hasMatch = false;
     let matchCount = 0;
@@ -494,7 +508,7 @@ export function searchContent(
           pushOutput(outputLines, prefix + matchText);
           if (match[0].length === 0) regex.lastIndex++;
         }
-      } else {
+      } else if (!(onlyMatching && omitContextLines)) {
         let outputLine = line;
         const separator = isMatch ? ":" : "-";
         if (showLineNumbers) outputLine = `${i + 1}${separator}${outputLine}`;
