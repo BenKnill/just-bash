@@ -1119,6 +1119,8 @@ async function searchFiles(
 ): Promise<ExecResult> {
   let stdout = "";
   let anyMatch = false;
+  /** A context group was printed, so the next file's group is separated. */
+  let printedContextGroup = false;
   const errors = new BoundedStringBuilder(
     Math.min(ctx.limits.maxOutputSize, ctx.limits.maxStringLength),
     "rg",
@@ -1297,6 +1299,16 @@ async function searchFiles(
           if (options.heading && !options.count && !options.countMatches) {
             if (stdout) stdout += "\n";
             if (showFilename) stdout += `${file}\n`;
+          } else if (
+            (options.beforeContext > 0 || options.afterContext > 0) &&
+            !options.count &&
+            !options.countMatches &&
+            result.output !== ""
+          ) {
+            // Without headings, ripgrep separates context groups from
+            // different files like groups within a file.
+            if (printedContextGroup) stdout += `${options.contextSeparator}\n`;
+            printedContextGroup = true;
           }
           stdout += result.output;
         }

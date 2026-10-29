@@ -265,9 +265,9 @@ describe("rg -I with context lines", () => {
     });
     const result = await bash.exec("rg -I -C1 --sort path match");
     expect(result.exitCode).toBe(0);
-    // No separator between files when -I is used since there's no filename prefix
+    // ripgrep 15.1.0 still separates the files' context groups with --
     expect(result.stdout).toBe(
-      "1-ctx\n2:match\n3-ctx\n1-ctx\n2:match\n3-ctx\n",
+      "1-ctx\n2:match\n3-ctx\n--\n1-ctx\n2:match\n3-ctx\n",
     );
   });
 });
