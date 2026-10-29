@@ -38,10 +38,8 @@ describe("sort collation follows the locale", () => {
     expect(result.stdout).toBe("z\n\u{FF21}\n\u{1F600}\n");
   });
 
-  it("applies the order to keys, ties and -V", async () => {
-    const result = await run(
-      "printf 'k b\\nk B\\n' | sort -k1,1; echo ==; printf 'f_9\\nRESULT.json\\na\\n' | sort -V",
-    );
-    expect(result.stdout).toBe("k B\nk b\n==\nRESULT.json\na\nf_9\n");
+  it("applies the order to keys and ties", async () => {
+    const result = await run("printf 'k b\\nk B\\n' | sort -k1,1");
+    expect(result.stdout).toBe("k B\nk b\n");
   });
 });

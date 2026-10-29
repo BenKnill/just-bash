@@ -2,6 +2,7 @@
 
 import type { Collate } from "../../helpers/collation.js";
 import type { KeySpec, SortOptions } from "./types.js";
+import { compareVersions } from "./version-order.js";
 
 // Human-readable size suffixes (case insensitive) - Map prevents prototype pollution
 const SIZE_SUFFIXES = new Map<string, number>([
@@ -55,33 +56,6 @@ function parseHumanSize(s: string): number {
 function parseMonth(s: string): number {
   const trimmed = s.trim().toLowerCase().slice(0, 3);
   return MONTHS.get(trimmed) ?? 0;
-}
-
-/**
- * Compare version strings naturally (e.g., "1.2" < "1.10")
- */
-function compareVersions(a: string, b: string, collate: Collate): number {
-  const partsA = a.split(/(\d+)/);
-  const partsB = b.split(/(\d+)/);
-  const maxLen = Math.max(partsA.length, partsB.length);
-
-  for (let i = 0; i < maxLen; i++) {
-    const partA = partsA[i] || "";
-    const partB = partsB[i] || "";
-
-    // Check if both parts are numeric
-    const numA = /^\d+$/.test(partA) ? parseInt(partA, 10) : null;
-    const numB = /^\d+$/.test(partB) ? parseInt(partB, 10) : null;
-
-    if (numA !== null && numB !== null) {
-      // Both numeric - compare as numbers
-      if (numA !== numB) return numA - numB;
-    } else {
-      // At least one is non-numeric - compare as strings
-      if (partA !== partB) return collate(partA, partB);
-    }
-  }
-  return 0;
 }
 
 /**
@@ -213,7 +187,7 @@ function compareValues(
 
   // Version sort
   if (opts.versionSort) {
-    return compareVersions(valA, valB, collate);
+    return compareVersions(valA, valB);
   }
 
   // Numeric sort
