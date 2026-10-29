@@ -27,6 +27,16 @@ describe("rg context groups across files", () => {
     );
   });
 
+  it("prints no separator when --passthru follows a context flag", async () => {
+    const all =
+      "f1-1-a\nf1:2:x\nf1-3-b\nf1:4:x\nf1:5:x\nf1-6-c\nf1-7-d\n" +
+      "f2:1:x\nf2-2-y\nf2-3-z\nf2:4:x\n";
+    const both = await run("rg --sort path -n -C1 --passthru x f1 f2");
+    expect(both.stdout).toBe(all);
+    const after = await run("rg --sort path -n -A1 --passthru x f1 f2");
+    expect(after.stdout).toBe(all);
+  });
+
   it("prints no separator for zero context or counts", async () => {
     const zero = await run("rg --sort path -n -A0 x f1 f2");
     expect(zero.stdout).toBe("f1:2:x\nf1:4:x\nf1:5:x\nf2:1:x\nf2:4:x\n");

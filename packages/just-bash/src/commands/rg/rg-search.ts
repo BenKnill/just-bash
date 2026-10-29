@@ -1301,6 +1301,7 @@ async function searchFiles(
             if (showFilename) stdout += `${file}\n`;
           } else if (
             (options.beforeContext > 0 || options.afterContext > 0) &&
+            !options.passthru &&
             !options.count &&
             !options.countMatches &&
             result.output !== ""
