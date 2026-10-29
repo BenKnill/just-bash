@@ -1,22 +1,45 @@
 /**
- * Shared checksum utilities for md5sum, sha1sum, sha256sum
- * Uses WebCrypto API for SHA algorithms, pure JS for MD5
+ * Shared checksum utilities for md5sum, sha1sum, sha256sum and shasum.
+ * Uses WebCrypto API for SHA algorithms, pure JS for MD5.
+ * Output, --check and its diagnostics follow GNU coreutils 9.7.
  */
 
 import { decodeBytesToUtf8, latin1FromBytes } from "../../encoding.js";
+import { rethrowFatalExecutionError } from "../../fatal-execution-error.js";
 import type {
   ExecResult,
   RuntimeCommand,
   RuntimeCommandContext,
 } from "../../types.js";
+import { fsErrorReason } from "../../utils/file-reader.js";
 import { hasHelpFlag, showHelp, unknownOption } from "../help.js";
 
-export type HashAlgorithm = "md5" | "sha1" | "sha256";
+export type HashAlgorithm = "md5" | "sha1" | "sha256" | "sha384" | "sha512";
 
 // Map prevents prototype pollution
 const WEBCRYPTO_ALGORITHMS = new Map<string, string>([
   ["sha1", "SHA-1"],
   ["sha256", "SHA-256"],
+  ["sha384", "SHA-384"],
+  ["sha512", "SHA-512"],
+]);
+
+/** Names used by --tag lines ("SHA256 (file) = hash"). */
+export const TAG_NAMES: Map<HashAlgorithm, string> = new Map([
+  ["md5", "MD5"],
+  ["sha1", "SHA1"],
+  ["sha256", "SHA256"],
+  ["sha384", "SHA384"],
+  ["sha512", "SHA512"],
+]);
+
+/** Hex digest length of each algorithm. */
+export const HEX_LENGTHS: Map<HashAlgorithm, number> = new Map([
+  ["md5", 32],
+  ["sha1", 40],
+  ["sha256", 64],
+  ["sha384", 96],
+  ["sha512", 128],
 ]);
 
 // Pure JS MD5 implementation (WebCrypto doesn't support MD5)
@@ -110,7 +133,7 @@ function md5(bytes: Uint8Array): string {
     .join("");
 }
 
-async function computeHash(
+export async function computeHash(
   algorithm: HashAlgorithm,
   data: Uint8Array,
 ): Promise<string> {
@@ -131,6 +154,280 @@ async function computeHash(
     .join("");
 }
 
+/** GNU quotes names in diagnostics when they hold shell-special characters. */
+export function quoteName(name: string): string {
+  if (/^[A-Za-z0-9._/+\-:,@%=^~]+$/.test(name)) return name;
+  if (!name.includes("'")) return `'${name}'`;
+  return `"${name.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
+/** Reads a hash input; "-" is standard input. */
+export async function readHashInput(
+  ctx: RuntimeCommandContext,
+  file: string,
+): Promise<{ bytes: Uint8Array } | { error: string }> {
+  if (file === "-") {
+    return {
+      bytes: Uint8Array.from(latin1FromBytes(ctx.stdin), (c) =>
+        c.charCodeAt(0),
+      ),
+    };
+  }
+  try {
+    const path = ctx.fs.resolvePath(ctx.cwd, file);
+    const stat = await ctx.fs.stat(path);
+    if (stat.isDirectory) return { error: "Is a directory" };
+    return { bytes: await ctx.fs.readFileBuffer(path) };
+  } catch (error) {
+    rethrowFatalExecutionError(error);
+    return { error: fsErrorReason(error) };
+  }
+}
+
+async function readListText(
+  ctx: RuntimeCommandContext,
+  file: string,
+): Promise<{ text: string } | { error: string }> {
+  try {
+    const path = ctx.fs.resolvePath(ctx.cwd, file);
+    const stat = await ctx.fs.stat(path);
+    if (stat.isDirectory) return { error: "Is a directory" };
+    return { text: await ctx.fs.readFile(path) };
+  } catch (error) {
+    rethrowFatalExecutionError(error);
+    return { error: fsErrorReason(error) };
+  }
+}
+
+/** GNU marks a name holding a backslash or newline with a leading "\". */
+function escapeName(name: string): { name: string; escaped: boolean } {
+  if (!name.includes("\\") && !name.includes("\n")) {
+    return { name, escaped: false };
+  }
+  return {
+    name: name.replace(/\\/g, "\\\\").replace(/\n/g, "\\n"),
+    escaped: true,
+  };
+}
+
+function unescapeName(name: string): string {
+  return name.replace(/\\(\\|n)/g, (_, c: string) => (c === "n" ? "\n" : "\\"));
+}
+
+export interface HashLineOptions {
+  binary: boolean;
+  tag: boolean;
+}
+
+/** One output line for a computed digest, as GNU md5sum/sha*sum print it. */
+export function formatHashLine(
+  algorithm: HashAlgorithm,
+  hash: string,
+  file: string,
+  options: HashLineOptions,
+): string {
+  const { name, escaped } = escapeName(file);
+  const prefix = escaped ? "\\" : "";
+  if (options.tag) {
+    return `${prefix}${TAG_NAMES.get(algorithm)} (${name}) = ${hash}\n`;
+  }
+  return `${prefix}${hash} ${options.binary ? "*" : " "}${name}\n`;
+}
+
+export interface ParsedCheckLine {
+  /** Algorithm named by a --tag line, if any. */
+  tagAlgorithm?: HashAlgorithm;
+  hash: string;
+  file: string;
+  /** The name as printed in results (GNU keeps the escape). */
+  display: string;
+}
+
+/** Parses one --check line: GNU "HASH  FILE" / "HASH *FILE", or a --tag line. */
+export function parseCheckLine(
+  line: string,
+  escapedDisplay: boolean,
+  separatorRequired = false,
+): ParsedCheckLine | null {
+  let text = line.endsWith("\r") ? line.slice(0, -1) : line;
+  const escaped = text.startsWith("\\");
+  if (escaped) text = text.slice(1);
+  const tagged = text.match(/^([A-Z0-9]+) ?\((.*)\) ?= ([0-9a-fA-F]+)$/);
+  if (tagged) {
+    let tagAlgorithm: HashAlgorithm | undefined;
+    for (const [algorithm, tagName] of TAG_NAMES) {
+      if (tagName === tagged[1]) tagAlgorithm = algorithm;
+    }
+    if (!tagAlgorithm) return null;
+    const file = escaped ? unescapeName(tagged[2]) : tagged[2];
+    return {
+      tagAlgorithm,
+      hash: tagged[3].toLowerCase(),
+      file,
+      display: escaped && escapedDisplay ? `\\${tagged[2]}` : file,
+    };
+  }
+  // GNU also accepts a single space between digest and name; shasum does not.
+  const plain = separatorRequired
+    ? text.match(/^([0-9a-fA-F]+) ([ *])(.+)$/)
+    : text.match(/^([0-9a-fA-F]+) ([ *]?)(.+)$/);
+  if (!plain) return null;
+  const file = escaped ? unescapeName(plain[3]) : plain[3];
+  return {
+    hash: plain[1].toLowerCase(),
+    file,
+    display: escaped && escapedDisplay ? `\\${plain[3]}` : file,
+  };
+}
+
+export interface CheckOptions {
+  quiet: boolean;
+  status: boolean;
+  strict: boolean;
+  ignoreMissing: boolean;
+}
+
+export interface CheckDialect {
+  name: string;
+  /** Picks the algorithm for a line, or null when the line is unusable. */
+  algorithmFor: (line: ParsedCheckLine) => HashAlgorithm | null;
+  /** Message after "NAME: FILE: " when a list has no usable line. */
+  noLinesMessage: string;
+  /** Quote the list name in that message (GNU) or not (shasum). */
+  quoteListName: boolean;
+  /** Results show a backslash-escaped name with its leading "\" (GNU). */
+  escapedDisplay: boolean;
+  /** Exit status when a list cannot be opened; shasum stops there. */
+  missingList: { exitCode: number; stop: boolean };
+  /** Quote file names in diagnostics (GNU) or print them as given (shasum). */
+  quoteNames: boolean;
+  /** Require "  " or " *" between digest and name (shasum). */
+  separatorRequired: boolean;
+}
+
+const plural = (n: number, one: string, many: string): string =>
+  n === 1 ? `${n} ${one}` : `${n} ${many}`;
+
+/** Runs --check over the given checksum lists. */
+export async function checkLists(
+  ctx: RuntimeCommandContext,
+  dialect: CheckDialect,
+  lists: string[],
+  options: CheckOptions,
+): Promise<ExecResult> {
+  let stdout = "";
+  let stderr = "";
+  let exitCode = 0;
+  for (const list of lists) {
+    let content: string;
+    if (list === "-") {
+      content = decodeBytesToUtf8(ctx.stdin);
+    } else {
+      // The list is text (hash + name); decode UTF-8 so non-ASCII names
+      // survive.
+      const read = await readListText(ctx, list);
+      if ("error" in read) {
+        const shown = dialect.quoteNames ? quoteName(list) : list;
+        stderr += `${dialect.name}: ${shown}: ${read.error}\n`;
+        exitCode = Math.max(exitCode, dialect.missingList.exitCode);
+        if (dialect.missingList.stop) return { stdout, stderr, exitCode };
+        continue;
+      }
+      content = read.text;
+    }
+    const listName = list === "-" ? "standard input" : list;
+    let improper = 0;
+    let unreadable = 0;
+    let mismatched = 0;
+    let usable = 0;
+    const lines = content.split("\n");
+    if (lines[lines.length - 1] === "") lines.pop();
+    for (const line of lines) {
+      const parsed = parseCheckLine(
+        line,
+        dialect.escapedDisplay,
+        dialect.separatorRequired,
+      );
+      const algorithm = parsed ? dialect.algorithmFor(parsed) : null;
+      if (
+        !parsed ||
+        !algorithm ||
+        parsed.hash.length !== HEX_LENGTHS.get(algorithm)
+      ) {
+        improper++;
+        continue;
+      }
+      usable++;
+      const input = await readHashInput(ctx, parsed.file);
+      if ("error" in input) {
+        if (
+          options.ignoreMissing &&
+          input.error === "No such file or directory"
+        )
+          continue;
+        const shown = dialect.quoteNames ? quoteName(parsed.file) : parsed.file;
+        stderr += `${dialect.name}: ${shown}: ${input.error}\n`;
+        if (!options.status)
+          stdout += `${parsed.display}: FAILED open or read\n`;
+        unreadable++;
+        continue;
+      }
+      const ok = (await computeHash(algorithm, input.bytes)) === parsed.hash;
+      if (!ok) mismatched++;
+      if (!options.status && !(ok && options.quiet)) {
+        stdout += `${parsed.display}: ${ok ? "OK" : "FAILED"}\n`;
+      }
+    }
+    if (usable === 0) {
+      const shown = dialect.quoteListName ? quoteName(listName) : listName;
+      stderr += `${dialect.name}: ${shown}: ${dialect.noLinesMessage}\n`;
+      exitCode = Math.max(exitCode, 1);
+      continue;
+    }
+    if (!options.status) {
+      if (improper > 0) {
+        stderr += `${dialect.name}: WARNING: ${plural(improper, "line is", "lines are")} improperly formatted\n`;
+      }
+      if (unreadable > 0) {
+        stderr += `${dialect.name}: WARNING: ${plural(unreadable, "listed file", "listed files")} could not be read\n`;
+      }
+      if (mismatched > 0) {
+        stderr += `${dialect.name}: WARNING: ${plural(mismatched, "computed checksum", "computed checksums")} did NOT match\n`;
+      }
+    }
+    if (mismatched > 0 || unreadable > 0 || (options.strict && improper > 0)) {
+      exitCode = Math.max(exitCode, 1);
+    }
+  }
+  return { stdout, stderr, exitCode };
+}
+
+/** Computes and prints the digest of each input, reporting unreadable ones. */
+export async function hashInputs(
+  ctx: RuntimeCommandContext,
+  name: string,
+  algorithm: HashAlgorithm,
+  files: string[],
+  options: HashLineOptions,
+  quoteNames = true,
+): Promise<ExecResult> {
+  let stdout = "";
+  let stderr = "";
+  let exitCode = 0;
+  for (const file of files) {
+    const input = await readHashInput(ctx, file);
+    if ("error" in input) {
+      // Errors go to stderr, so `md5sum a b > sums` stays clean
+      stderr += `${name}: ${quoteNames ? quoteName(file) : file}: ${input.error}\n`;
+      exitCode = 1;
+      continue;
+    }
+    const hash = await computeHash(algorithm, input.bytes);
+    stdout += formatHashLine(algorithm, hash, file, options);
+  }
+  return { stdout, stderr, exitCode };
+}
+
 export function createChecksumCommand(
   name: string,
   algorithm: HashAlgorithm,
@@ -141,9 +438,29 @@ export function createChecksumCommand(
     summary,
     usage: `${name} [OPTION]... [FILE]...`,
     options: [
+      "-b, --binary   read in binary mode (marks lines with *)",
       "-c, --check    read checksums from FILEs and check them",
+      "    --tag      create a BSD-style checksum",
+      "-t, --text     read in text mode (default)",
+      "    --ignore-missing  don't fail or report status for missing files",
+      "    --quiet    don't print OK for each successfully verified file",
+      "    --status   don't output anything, status code shows success",
+      "    --strict   exit non-zero for improperly formatted checksum lines",
       "    --help     display this help and exit",
     ],
+  };
+  const dialect: CheckDialect = {
+    name,
+    algorithmFor: (line) =>
+      line.tagAlgorithm === undefined || line.tagAlgorithm === algorithm
+        ? algorithm
+        : null,
+    noLinesMessage: "no properly formatted checksum lines found",
+    quoteListName: true,
+    escapedDisplay: true,
+    missingList: { exitCode: 1, stop: false },
+    quoteNames: true,
+    separatorRequired: false,
   };
 
   return {
@@ -155,97 +472,43 @@ export function createChecksumCommand(
       if (hasHelpFlag(args)) return showHelp(help);
 
       let check = false;
+      const lineOptions: HashLineOptions = { binary: false, tag: false };
+      const checkOptions: CheckOptions = {
+        quiet: false,
+        status: false,
+        strict: false,
+        ignoreMissing: false,
+      };
       const files: string[] = [];
+      let parseOptions = true;
 
       for (const arg of args) {
-        if (arg === "-c" || arg === "--check") check = true;
-        else if (
-          arg === "-b" ||
-          arg === "-t" ||
-          arg === "--binary" ||
-          arg === "--text"
-        ) {
-          /* ignored */
-        } else if (arg.startsWith("-") && arg !== "-")
-          return unknownOption(name, arg);
-        else files.push(arg);
+        if (!parseOptions || arg === "-" || !arg.startsWith("-")) {
+          files.push(arg);
+        } else if (arg === "--") parseOptions = false;
+        else if (arg === "--check") check = true;
+        else if (arg === "--binary") lineOptions.binary = true;
+        else if (arg === "--text") lineOptions.binary = false;
+        else if (arg === "--tag") lineOptions.tag = true;
+        else if (arg === "--quiet") checkOptions.quiet = true;
+        else if (arg === "--status") checkOptions.status = true;
+        else if (arg === "--strict") checkOptions.strict = true;
+        else if (arg === "--ignore-missing") checkOptions.ignoreMissing = true;
+        else if (arg.startsWith("--")) return unknownOption(name, arg);
+        else {
+          for (const flag of arg.slice(1)) {
+            if (flag === "c") check = true;
+            else if (flag === "b") lineOptions.binary = true;
+            else if (flag === "t") lineOptions.binary = false;
+            else return unknownOption(name, `-${flag}`);
+          }
+        }
       }
 
       if (files.length === 0) files.push("-");
 
-      // Helper to read file as binary. md5sum hashes raw bytes — pass them
-      // through without decoding.
-      const readBinary = async (file: string): Promise<Uint8Array | null> => {
-        if (file === "-") {
-          return Uint8Array.from(latin1FromBytes(ctx.stdin), (c) =>
-            c.charCodeAt(0),
-          );
-        }
-        try {
-          return await ctx.fs.readFileBuffer(ctx.fs.resolvePath(ctx.cwd, file));
-        } catch {
-          return null;
-        }
-      };
-
-      if (check) {
-        let failed = 0;
-        let output = "";
-
-        for (const file of files) {
-          // For check mode, the checksum file is text (hash + filename).
-          // Decode UTF-8 so non-ASCII filenames in the list survive.
-          const content =
-            file === "-"
-              ? decodeBytesToUtf8(ctx.stdin)
-              : await ctx.fs
-                  .readFile(ctx.fs.resolvePath(ctx.cwd, file))
-                  .catch(() => null);
-          if (content === null)
-            return {
-              stdout: "",
-              stderr: `${name}: ${file}: No such file or directory\n`,
-              exitCode: 1,
-            };
-
-          for (const line of content.split("\n")) {
-            const match = line.match(/^([a-fA-F0-9]+)\s+[* ]?(.+)$/);
-            if (!match) continue;
-
-            const [, expectedHash, targetFile] = match;
-            const fileContent = await readBinary(targetFile);
-            if (fileContent === null) {
-              output += `${targetFile}: FAILED open or read\n`;
-              failed++;
-              continue;
-            }
-            const ok =
-              (await computeHash(algorithm, fileContent)) ===
-              expectedHash.toLowerCase();
-            output += `${targetFile}: ${ok ? "OK" : "FAILED"}\n`;
-            if (!ok) failed++;
-          }
-        }
-
-        if (failed > 0)
-          output += `${name}: WARNING: ${failed} computed checksum${failed > 1 ? "s" : ""} did NOT match\n`;
-        return { stdout: output, stderr: "", exitCode: failed > 0 ? 1 : 0 };
-      }
-
-      let output = "";
-      let exitCode = 0;
-
-      for (const file of files) {
-        const content = await readBinary(file);
-        if (content === null) {
-          output += `${name}: ${file}: No such file or directory\n`;
-          exitCode = 1;
-          continue;
-        }
-        output += `${await computeHash(algorithm, content)}  ${file}\n`;
-      }
-
-      return { stdout: output, stderr: "", exitCode };
+      if (check) return checkLists(ctx, dialect, files, checkOptions);
+      return hashInputs(ctx, name, algorithm, files, lineOptions);
     },
   };
 }

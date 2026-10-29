@@ -10,6 +10,21 @@ import { ExecutionLimitError } from "../interpreter/errors.js";
 import type { ExecResult, RuntimeCommandContext } from "../types.js";
 import { DEFAULT_BATCH_SIZE } from "./constants.js";
 
+/**
+ * The strerror text for a failed file system call, as GNU tools print it:
+ * "Is a directory", "Not a directory", "Permission denied", or "No such file
+ * or directory" (the default).
+ */
+export function fsErrorReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith("EISDIR")) return "Is a directory";
+  if (message.startsWith("ENOTDIR")) return "Not a directory";
+  if (message.startsWith("EACCES") || message.startsWith("EPERM")) {
+    return "Permission denied";
+  }
+  return "No such file or directory";
+}
+
 export interface ReadFilesOptions {
   /** Command name for error messages */
   cmdName: string;

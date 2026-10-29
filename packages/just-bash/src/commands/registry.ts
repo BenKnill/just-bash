@@ -87,6 +87,7 @@ export type CommandName =
   | "md5sum"
   | "sha1sum"
   | "sha256sum"
+  | "shasum"
   | "file"
   | "html-to-markdown"
   | "help"
@@ -426,6 +427,10 @@ const commandLoaders: LazyCommandDef<CommandName>[] = [
   {
     name: "sha256sum",
     load: async () => (await import("./md5sum/sha256sum.js")).sha256sumCommand,
+  },
+  {
+    name: "shasum",
+    load: async () => (await import("./md5sum/shasum.js")).shasumCommand,
   },
 
   // File type detection

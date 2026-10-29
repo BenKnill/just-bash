@@ -64,8 +64,11 @@ describe("md5sum", () => {
         "echo '5d41402abc4b2a76b9719d911017c592  /tmp/wrong.txt' > /tmp/sums.txt",
       );
       const result = await env.exec("md5sum -c /tmp/sums.txt");
-      expect(result.stdout).toContain("/tmp/wrong.txt: FAILED");
-      expect(result.stdout).toContain("WARNING");
+      expect(result.stdout).toBe("/tmp/wrong.txt: FAILED\n");
+      // GNU md5sum writes the summary warning to stderr
+      expect(result.stderr).toBe(
+        "md5sum: WARNING: 1 computed checksum did NOT match\n",
+      );
       expect(result.exitCode).toBe(1);
     });
   });
@@ -74,7 +77,11 @@ describe("md5sum", () => {
     it("should error on missing file", async () => {
       const env = new Bash();
       const result = await env.exec("md5sum /tmp/nonexistent");
-      expect(result.stdout).toContain("No such file or directory");
+      // The error goes to stderr, not into the checksum output
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe(
+        "md5sum: /tmp/nonexistent: No such file or directory\n",
+      );
       expect(result.exitCode).toBe(1);
     });
   });
