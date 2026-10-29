@@ -545,8 +545,11 @@ export const grepCommand: RuntimeCommand = {
     let stderr = "";
     let anyMatch = false;
     let anyError = false;
-    /** A context group was printed, so the next file's group is separated. */
-    let printedGroup = false;
+    /**
+     * A file had a selected line, so the next file's first group is
+     * separated, even when that group printed nothing (-v -o).
+     */
+    let hadGroup = false;
 
     // Collect all files to search (expand globs first)
     // FileEntry includes type info when available to skip stat calls
@@ -792,10 +795,12 @@ export const grepCommand: RuntimeCommand = {
           if (filesWithMatches) {
             stdout += `${file}\n`;
           } else if (!filesWithoutMatch) {
-            if (contextGiven && !countOnly && result.output !== "") {
-              // GNU grep separates the groups of different files with --
-              if (printedGroup) stdout += "--\n";
-              printedGroup = true;
+            if (contextGiven && !countOnly) {
+              // GNU grep separates the groups of different files with --.
+              // It does so even when a group prints nothing, as under -v -o
+              // when the selected lines have no match to print.
+              if (hadGroup) stdout += "--\n";
+              hadGroup = true;
             }
             stdout += result.output;
           }

@@ -79,4 +79,28 @@ describe("grep -o with context (GNU)", () => {
     const zero = await run(`${setup}grep -v -o -n -C0 b f`);
     expect(zero.stdout).toBe("--\n");
   });
+
+  describe("under -v, separates files whose groups print nothing", () => {
+    const setup =
+      "printf 'a\\nxbx\\nc\\nd\\ne\\nb\\n' > f; printf 'q\\nbb\\n' > g; " +
+      "printf 'b\\nb\\n' > h; printf 'x\\ny\\n' > k; : > e; ";
+
+    it("with -A0, -B1 and -C1", async () => {
+      const a0 = await run(`${setup}grep -v -o -n -A0 b f g`);
+      expect(a0.stdout).toBe("--\n--\n");
+      const b1 = await run(`${setup}grep -v -o -n -B1 b k g f`);
+      expect(b1.stdout).toBe("--\n--\nf-2-b\n");
+      const c1 = await run(`${setup}grep -v -o -n -C1 b g k f`);
+      expect(c1.stdout).toBe("g-2-b\ng-2-b\n--\n--\nf-2-b\nf-6-b\n");
+    });
+
+    it("with -m, but not for files without selected lines or with -c", async () => {
+      const max = await run(`${setup}grep -v -o -m1 -n -A0 b f g`);
+      expect(max.stdout).toBe("--\n");
+      const skipped = await run(`${setup}grep -v -o -n -C1 b f h e g`);
+      expect(skipped.stdout).toBe("f-2-b\nf-6-b\n--\ng-2-b\ng-2-b\n");
+      const count = await run(`${setup}grep -v -o -c -A0 b f g h`);
+      expect(count.stdout).toBe("f:4\ng:1\nh:0\n");
+    });
+  });
 });
