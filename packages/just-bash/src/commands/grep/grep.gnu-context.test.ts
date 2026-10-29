@@ -68,4 +68,15 @@ describe("grep -o with context (GNU)", () => {
     const contiguous = await run("grep -o -A1 x f1");
     expect(contiguous.stdout).toBe("x\nx\nx\n");
   });
+
+  it("prints the matches in context lines under -v", async () => {
+    const setup =
+      "printf 'a\\nxbx\\nc\\nd\\ne\\nb\\n' > f; printf 'q\\nbb\\n' > g; ";
+    const plain = await run(`${setup}grep -v -o -C1 b f`);
+    expect(plain.stdout).toBe("b\nb\n");
+    const numbered = await run(`${setup}grep -v -o -n -A1 b f g`);
+    expect(numbered.stdout).toBe("f-2-b\nf-6-b\n--\ng-2-b\ng-2-b\n");
+    const zero = await run(`${setup}grep -v -o -n -C0 b f`);
+    expect(zero.stdout).toBe("--\n");
+  });
 });

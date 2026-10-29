@@ -460,6 +460,28 @@ export function searchContent(
     }
   }
 
+  // -o: print each match in line i. GNU grep puts ":" after the file name and
+  // line number of a selected line, and "-" after those of a context line.
+  const pushMatches = (i: number, line: string, sep: string): void => {
+    regex.lastIndex = 0;
+    for (
+      let match = regex.exec(line);
+      match !== null;
+      match = regex.exec(line)
+    ) {
+      chargeWork();
+      // If \K was used, extract from the capture group instead of full match
+      const rawMatch =
+        kResetGroup !== undefined ? (match[kResetGroup] ?? "") : match[0];
+      const matchText = replace !== null ? replace : rawMatch;
+      let prefix = filename ? `${filename}${sep}` : "";
+      if (showLineNumbers) prefix += `${i + 1}${sep}`;
+      if (showColumn) prefix += `${match.index + 1}${sep}`;
+      pushOutput(outputLines, prefix + matchText);
+      if (match[0].length === 0) regex.lastIndex++;
+    }
+  };
+
   // Second pass: output with context
   for (const lineNum of matchingLineNumbers) {
     chargeWork();
@@ -491,24 +513,12 @@ export function searchContent(
         regex.test(line) !== invertMatch;
 
       if (isMatch && onlyMatching) {
-        regex.lastIndex = 0;
-        for (
-          let match = regex.exec(line);
-          match !== null;
-          match = regex.exec(line)
-        ) {
-          chargeWork();
-          // If \K was used, extract from the capture group instead of full match
-          const rawMatch =
-            kResetGroup !== undefined ? (match[kResetGroup] ?? "") : match[0];
-          const matchText = replace !== null ? replace : rawMatch;
-          let prefix = filename ? `${filename}:` : "";
-          if (showLineNumbers) prefix += `${i + 1}:`;
-          if (showColumn) prefix += `${match.index + 1}:`;
-          pushOutput(outputLines, prefix + matchText);
-          if (match[0].length === 0) regex.lastIndex++;
-        }
-      } else if (!(onlyMatching && omitContextLines)) {
+        pushMatches(i, line, ":");
+      } else if (onlyMatching && omitContextLines) {
+        // GNU grep -o prints no context lines. Under -v, though, the context
+        // lines are the ones that match, and it prints their matches.
+        if (invertMatch) pushMatches(i, line, "-");
+      } else {
         let outputLine = line;
         const separator = isMatch ? ":" : "-";
         if (showLineNumbers) outputLine = `${i + 1}${separator}${outputLine}`;
