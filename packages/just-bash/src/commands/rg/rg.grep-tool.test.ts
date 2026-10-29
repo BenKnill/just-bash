@@ -133,9 +133,13 @@ describe("rg Grep tool argument and error boundaries", () => {
     expect(result.exitCode).toBe(2);
   });
 
-  it("preserves the documented smart-case default and explicit case controls", async () => {
+  it("matches case-sensitively by default, like ripgrep, with explicit case controls", async () => {
     const bash = new Bash({ files: { "/a.ts": "Permission\n" } });
-    const smart = await bash.exec("rg -n --color never -- permission /a.ts");
+    const plain = await bash.exec("rg -n --color never -- permission /a.ts");
+    expect(plain.stdout).toBe("");
+    expect(plain.stderr).toBe("");
+    expect(plain.exitCode).toBe(1);
+    const smart = await bash.exec("rg -n -S --color never -- permission /a.ts");
     expect(smart.stdout).toBe("1:Permission\n");
     expect(smart.stderr).toBe("");
     expect(smart.exitCode).toBe(0);

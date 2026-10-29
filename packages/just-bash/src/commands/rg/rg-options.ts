@@ -71,7 +71,9 @@ export function createDefaultOptions(): RgOptions {
   return {
     ignoreCase: false,
     caseSensitive: false,
-    smartCase: true,
+    // Real ripgrep is case-sensitive unless -S/--smart-case (or a config
+    // file) asks otherwise.
+    smartCase: false,
     fixedStrings: false,
     wordRegexp: false,
     lineRegexp: false,

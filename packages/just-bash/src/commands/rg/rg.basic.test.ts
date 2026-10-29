@@ -97,7 +97,7 @@ describe("rg basic search", () => {
 });
 
 describe("rg case sensitivity", () => {
-  it("should use smart case by default (lowercase = case-insensitive)", async () => {
+  it("should be case-sensitive by default, like ripgrep", async () => {
     const bash = new Bash({
       cwd: "/home/user",
       files: {
@@ -105,6 +105,19 @@ describe("rg case sensitivity", () => {
       },
     });
     const result = await bash.exec("rg hello");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("file.txt:2:hello world\n");
+    expect(result.stderr).toBe("");
+  });
+
+  it("should use smart case with -S (lowercase = case-insensitive)", async () => {
+    const bash = new Bash({
+      cwd: "/home/user",
+      files: {
+        "/home/user/file.txt": "Hello World\nhello world\n",
+      },
+    });
+    const result = await bash.exec("rg -S hello");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(
       "file.txt:1:Hello World\nfile.txt:2:hello world\n",

@@ -130,9 +130,21 @@ describe("rg ripgrep-compat: case sensitivity", () => {
       },
     });
     // Smart case: lowercase pattern = case-insensitive
-    const result = await bash.exec("rg test");
+    const result = await bash.exec("rg -S test");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("foo:1:tEsT\n");
+  });
+
+  it("should match case-sensitively without -S (ripgrep 15.1.0)", async () => {
+    const bash = new Bash({
+      cwd: "/home/user",
+      files: {
+        "/home/user/foo": "tEsT\n",
+      },
+    });
+    const result = await bash.exec("rg test");
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
   });
 
   it("should use smart case with uppercase pattern (case-sensitive)", async () => {

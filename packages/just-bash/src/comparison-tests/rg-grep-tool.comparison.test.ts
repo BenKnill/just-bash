@@ -42,8 +42,7 @@ describe("rg Grep tool compatibility (ripgrep 15.2.0)", () => {
     );
   });
 
-  // Six optional flags give 64 combinations. Use an uppercase pattern so the
-  // preserved just-bash smart-case default agrees with rg without -i.
+  // Six optional flags give 64 combinations, all with an uppercase pattern.
   const optionalFlags = [
     "-i",
     "--type ts",

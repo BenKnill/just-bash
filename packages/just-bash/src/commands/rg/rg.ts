@@ -6,7 +6,7 @@
  * - Respects .gitignore
  * - Skips hidden files by default
  * - Skips binary files by default
- * - Smart case sensitivity (case-insensitive unless pattern has uppercase)
+ * - Case-sensitive like ripgrep; -S enables smart case
  */
 
 import type {
@@ -39,8 +39,8 @@ EXAMPLES:
     "-e, --regexp PATTERN    search for PATTERN (can be used multiple times)",
     "-f, --file FILE         read patterns from FILE, one per line",
     "-i, --ignore-case       case-insensitive search",
-    "-s, --case-sensitive    case-sensitive search (overrides smart-case)",
-    "-S, --smart-case        smart case (default: case-insensitive unless pattern has uppercase)",
+    "-s, --case-sensitive    case-sensitive search (the default)",
+    "-S, --smart-case        case-insensitive unless the pattern has uppercase",
     "-F, --fixed-strings     treat pattern as literal string",
     "-w, --word-regexp       match whole words only",
     "-x, --line-regexp       match whole lines only",
