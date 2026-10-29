@@ -99,6 +99,19 @@ describe("shasum", () => {
     );
   });
 
+  it("skips comments, counts empty lines and accepts a tab before the mode", async () => {
+    const result = await run(
+      "h=$(shasum a | cut -d' ' -f1); printf '# list\\n%s\\t*a\\n\\n' \"$h\" > L; " +
+        "shasum -c L; echo rc=$?; shasum -c --strict L; echo rc=$?; " +
+        "printf '%s\\ta\\n' \"$h\" | shasum -c; echo rc=$?",
+    );
+    expect(result.stdout).toBe("a: OK\nrc=0\na: OK\nrc=1\nrc=1\n");
+    expect(result.stderr).toBe(
+      "shasum: WARNING: 1 line is improperly formatted\n".repeat(2) +
+        "shasum: standard input: no properly formatted SHA checksum lines found\n",
+    );
+  });
+
   it("rejects unknown options and algorithms like shasum", async () => {
     const result = await run(
       "shasum -z a; echo rc=$?; shasum -a 7 a; echo rc=$?",
@@ -159,6 +172,30 @@ describe("GNU checksum --check diagnostics", () => {
       "sha256sum: M: no properly formatted checksum lines found\n" +
         "sha256sum: WARNING: 1 line is improperly formatted\n" +
         "sha256sum: 'standard input': no properly formatted checksum lines found\n",
+    );
+  });
+
+  it("accepts a tab after the digest and skips comments and empty lines", async () => {
+    const result = await run(
+      "h=$(md5sum a | cut -d' ' -f1); printf '# list\\n%s\\ta\\n\\n' \"$h\" > L; " +
+        "md5sum -c --strict L; echo rc=$?; " +
+        "printf '%s\\t*a\\n' \"$h\" | md5sum -c --strict; echo rc=$?",
+    );
+    expect(result.stdout).toBe("a: OK\nrc=0\na: OK\nrc=0\n");
+    expect(result.stderr).toBe("");
+  });
+
+  it("fails --ignore-missing when no listed file was verified", async () => {
+    const result = await run(
+      "md5sum a e > S; rm a e; md5sum -c --ignore-missing S; echo rc=$?; " +
+        "md5sum -c --ignore-missing --status S; echo rc=$?; " +
+        "md5sum -c --ignore-missing - < S; echo rc=$?; " +
+        "printf 'hello\\n' > a; md5sum -c --ignore-missing S; echo rc=$?",
+    );
+    expect(result.stdout).toBe("rc=1\nrc=1\nrc=1\na: OK\nrc=0\n");
+    expect(result.stderr).toBe(
+      "md5sum: S: no file was verified\n" +
+        "md5sum: 'standard input': no file was verified\n",
     );
   });
 

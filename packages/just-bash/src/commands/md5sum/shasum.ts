@@ -68,6 +68,7 @@ const dialect: CheckDialect = {
   missingList: { exitCode: 2, stop: true },
   quoteNames: false,
   separatorRequired: true,
+  skipEmptyLines: false,
 };
 
 function usageError(message: string): ExecResult {

@@ -267,10 +267,11 @@ export function parseCheckLine(
       display: escaped && escapedDisplay ? `\\${tagged[2]}` : file,
     };
   }
-  // GNU also accepts a single space between digest and name; shasum does not.
+  // A space or tab follows the digest. GNU then takes an optional " " or "*"
+  // mode character; shasum requires one.
   const plain = separatorRequired
-    ? text.match(/^([0-9a-fA-F]+) ([ *])(.+)$/)
-    : text.match(/^([0-9a-fA-F]+) ([ *]?)(.+)$/);
+    ? text.match(/^([0-9a-fA-F]+)[ \t]([ *])(.+)$/)
+    : text.match(/^([0-9a-fA-F]+)[ \t]([ *]?)(.+)$/);
   if (!plain) return null;
   const file = escaped ? unescapeName(plain[3]) : plain[3];
   return {
@@ -301,8 +302,10 @@ export interface CheckDialect {
   missingList: { exitCode: number; stop: boolean };
   /** Quote file names in diagnostics (GNU) or print them as given (shasum). */
   quoteNames: boolean;
-  /** Require "  " or " *" between digest and name (shasum). */
+  /** Require a mode character (" " or "*") after the separator (shasum). */
   separatorRequired: boolean;
+  /** Skip empty lines silently (GNU); shasum counts them as improper. */
+  skipEmptyLines: boolean;
 }
 
 const plural = (n: number, one: string, many: string): string =>
@@ -339,10 +342,14 @@ export async function checkLists(
     let improper = 0;
     let unreadable = 0;
     let mismatched = 0;
+    let verified = 0;
     let usable = 0;
     const lines = content.split("\n");
     if (lines[lines.length - 1] === "") lines.pop();
     for (const line of lines) {
+      // Both GNU and shasum skip comment lines; GNU also skips empty ones.
+      if (line.startsWith("#")) continue;
+      if (dialect.skipEmptyLines && (line === "" || line === "\r")) continue;
       const parsed = parseCheckLine(
         line,
         dialect.escapedDisplay,
@@ -373,14 +380,15 @@ export async function checkLists(
         continue;
       }
       const ok = (await computeHash(algorithm, input.bytes)) === parsed.hash;
-      if (!ok) mismatched++;
+      if (ok) verified++;
+      else mismatched++;
       if (!options.status && !(ok && options.quiet)) {
         stdout += `${parsed.display}: ${ok ? "OK" : "FAILED"}\n`;
       }
     }
+    const shownList = dialect.quoteListName ? quoteName(listName) : listName;
     if (usable === 0) {
-      const shown = dialect.quoteListName ? quoteName(listName) : listName;
-      stderr += `${dialect.name}: ${shown}: ${dialect.noLinesMessage}\n`;
+      stderr += `${dialect.name}: ${shownList}: ${dialect.noLinesMessage}\n`;
       exitCode = Math.max(exitCode, 1);
       continue;
     }
@@ -394,8 +402,16 @@ export async function checkLists(
       if (mismatched > 0) {
         stderr += `${dialect.name}: WARNING: ${plural(mismatched, "computed checksum", "computed checksums")} did NOT match\n`;
       }
+      if (options.ignoreMissing && verified === 0) {
+        stderr += `${dialect.name}: ${shownList}: no file was verified\n`;
+      }
     }
-    if (mismatched > 0 || unreadable > 0 || (options.strict && improper > 0)) {
+    if (
+      mismatched > 0 ||
+      unreadable > 0 ||
+      (options.strict && improper > 0) ||
+      (options.ignoreMissing && verified === 0)
+    ) {
       exitCode = Math.max(exitCode, 1);
     }
   }
@@ -461,6 +477,7 @@ export function createChecksumCommand(
     missingList: { exitCode: 1, stop: false },
     quoteNames: true,
     separatorRequired: false,
+    skipEmptyLines: true,
   };
 
   return {
