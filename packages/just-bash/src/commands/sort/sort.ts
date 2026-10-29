@@ -1,4 +1,5 @@
 import { decodeBytesToUtf8 } from "../../encoding.js";
+import { getCollate } from "../../helpers/collation.js";
 import type {
   ExecResult,
   RuntimeCommand,
@@ -177,8 +178,8 @@ export const sortCommand: RuntimeCommand = {
       lines.pop();
     }
 
-    // Create comparator
-    const comparator = createComparator(options);
+    // Create comparator; string order follows LC_ALL / LC_COLLATE / LANG
+    const comparator = createComparator(options, getCollate(ctx.env));
 
     // Check mode: verify if already sorted
     if (options.checkOnly) {

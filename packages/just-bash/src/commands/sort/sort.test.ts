@@ -72,7 +72,16 @@ describe("sort command", () => {
 
   it("should handle case-sensitive sorting", async () => {
     const env = createEnv();
+    // No locale set: the C locale collates by byte, upper case first (GNU)
     const result = await env.exec("sort /test/mixed.txt");
+    expect(result.stdout).toBe("Alpha\nZebra\nalpha\nzebra\n");
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("should use locale collation for a non-C locale", async () => {
+    const env = createEnv();
+    const result = await env.exec("LC_ALL=en_US.UTF-8 sort /test/mixed.txt");
     expect(result.stdout).toBe("alpha\nAlpha\nzebra\nZebra\n");
     expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);

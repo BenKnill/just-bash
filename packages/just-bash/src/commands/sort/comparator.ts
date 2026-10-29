@@ -1,5 +1,6 @@
 // Comparator functions for sort command
 
+import type { Collate } from "../../helpers/collation.js";
 import type { KeySpec, SortOptions } from "./types.js";
 
 // Human-readable size suffixes (case insensitive) - Map prevents prototype pollution
@@ -59,7 +60,7 @@ function parseMonth(s: string): number {
 /**
  * Compare version strings naturally (e.g., "1.2" < "1.10")
  */
-function compareVersions(a: string, b: string): number {
+function compareVersions(a: string, b: string, collate: Collate): number {
   const partsA = a.split(/(\d+)/);
   const partsB = b.split(/(\d+)/);
   const maxLen = Math.max(partsA.length, partsB.length);
@@ -77,7 +78,7 @@ function compareVersions(a: string, b: string): number {
       if (numA !== numB) return numA - numB;
     } else {
       // At least one is non-numeric - compare as strings
-      if (partA !== partB) return partA.localeCompare(partB);
+      if (partA !== partB) return collate(partA, partB);
     }
   }
   return 0;
@@ -175,7 +176,12 @@ interface CompareOptions {
 /**
  * Compare two values, handling various sort modes
  */
-function compareValues(a: string, b: string, opts: CompareOptions): number {
+function compareValues(
+  a: string,
+  b: string,
+  opts: CompareOptions,
+  collate: Collate,
+): number {
   let valA = a;
   let valB = b;
 
@@ -207,7 +213,7 @@ function compareValues(a: string, b: string, opts: CompareOptions): number {
 
   // Version sort
   if (opts.versionSort) {
-    return compareVersions(valA, valB);
+    return compareVersions(valA, valB, collate);
   }
 
   // Numeric sort
@@ -217,8 +223,8 @@ function compareValues(a: string, b: string, opts: CompareOptions): number {
     return numA - numB;
   }
 
-  // String comparison
-  return valA.localeCompare(valB);
+  // String comparison in the locale's collation order
+  return collate(valA, valB);
 }
 
 /**
@@ -226,6 +232,7 @@ function compareValues(a: string, b: string, opts: CompareOptions): number {
  */
 export function createComparator(
   options: SortOptions,
+  collate: Collate,
 ): (a: string, b: string) => number {
   const {
     keys,
@@ -262,7 +269,7 @@ export function createComparator(
         monthSort: globalMonthSort,
       };
 
-      const result = compareValues(lineA, lineB, opts);
+      const result = compareValues(lineA, lineB, opts, collate);
 
       if (result !== 0) {
         return globalReverse ? -result : result;
@@ -270,7 +277,7 @@ export function createComparator(
 
       // Tiebreaker: use original lines unless stable sort
       if (!globalStable) {
-        const tiebreaker = a.localeCompare(b);
+        const tiebreaker = collate(a, b);
         return globalReverse ? -tiebreaker : tiebreaker;
       }
       return 0;
@@ -298,7 +305,7 @@ export function createComparator(
       };
       const useReverse = key.reverse ?? globalReverse;
 
-      const result = compareValues(valA, valB, opts);
+      const result = compareValues(valA, valB, opts, collate);
 
       if (result !== 0) {
         return useReverse ? -result : result;
@@ -307,7 +314,7 @@ export function createComparator(
 
     // All keys equal, compare whole lines as tiebreaker unless stable
     if (!globalStable) {
-      const tiebreaker = a.localeCompare(b);
+      const tiebreaker = collate(a, b);
       return globalReverse ? -tiebreaker : tiebreaker;
     }
     return 0;

@@ -306,7 +306,6 @@ status=0
 ## END
 
 #### compgen -k shows the same keywords as bash
-## SKIP (unimplementable): Interactive shell invocation not implemented
 
 # bash adds ]] and } and coproc
 

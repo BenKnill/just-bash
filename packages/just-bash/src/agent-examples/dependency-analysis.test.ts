@@ -171,19 +171,20 @@ export interface Post {
     const result = await env.exec(
       'grep -rh "^import" /project/src | sort | uniq',
     );
+    // Byte order: no locale is set, so sort uses the C locale (GNU)
     expect(result.stdout).toBe(`import { App } from './app';
 import { Config } from '../config';
 import { Config } from './config';
 import { Database } from '../db';
 import { Database } from './db';
+import { PostController } from './controllers/post';
+import { Router } from './router';
+import { User } from './user';
+import { UserController } from './controllers/user';
 import { formatDate } from '../utils/helpers';
 import { logger } from '../utils/logger';
 import { logger } from './utils/logger';
-import { PostController } from './controllers/post';
-import { Router } from './router';
 import { slugify, formatDate } from '../utils/helpers';
-import { User } from './user';
-import { UserController } from './controllers/user';
 `);
     expect(result.exitCode).toBe(0);
   });

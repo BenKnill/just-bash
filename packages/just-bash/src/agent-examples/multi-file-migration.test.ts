@@ -323,12 +323,13 @@ const winston = require('winston');
     const result = await env.exec(
       "grep -rh \"require('\\./\\|require('../\" /project/src | sort | uniq",
     );
-    expect(result.stdout).toBe(`const { createServer } = require('./server');
+    // Byte order: no locale is set, so sort uses the C locale (GNU)
+    expect(result.stdout).toBe(`const config = require('./config');
+const { UserController } = require('../controllers/user');
+const { createServer } = require('./server');
 const { db } = require('../db');
 const { logger } = require('../utils/logger');
 const { logger } = require('./utils/logger');
-const { UserController } = require('../controllers/user');
-const config = require('./config');
 `);
     expect(result.exitCode).toBe(0);
   });
